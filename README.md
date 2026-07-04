@@ -4,7 +4,7 @@ A single-header C library for reading ZIP archives using [minizip-ng](https://gi
 
 ## Features
 
-- **Read-only** access to ZIP archives through [`SDL_Storage`](https://wiki.libsdl.org/SDL3/CategoryStorage)
+- Read ZIP archives through [`SDL_Storage`](https://wiki.libsdl.org/SDL3/CategoryStorage)
 - Uses native `SDL_IOStream` for all underlying I/O operations
 - Single-header `stb`-style library
 - Thread-safe
