@@ -12,11 +12,12 @@ extern "C" {
 #endif
 
 /**
- * \brief Opens a zip archive as an SDL_Storage instance using an SDL_IOStream.
+ * \brief Opens a zip archive as a read-only SDL_Storage instance using an SDL_IOStream.
  *
  * This function allows reading files contained within a zip archive transparently
- * through the SDL_Storage API. The provided SDL_IOStream is used as the backing
- * storage for the zip archive.
+ * through the SDL_Storage API. The returned storage is read-only; write operations
+ * such as SDL_WriteStorageFile will return false. The provided SDL_IOStream is used
+ * as the backing storage for the zip archive.
  *
  * \param src The SDL_IOStream containing the zip archive data.
  * \param closeio true to close the SDL_IOStream whether this function succeeds or fails.
@@ -25,10 +26,11 @@ extern "C" {
 SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, bool closeio);
 
 /**
- * \brief Opens a zip archive as an SDL_Storage instance from a file path.
+ * \brief Opens a zip archive as a read-only SDL_Storage instance from a file path.
  *
  * This is a convenience wrapper around SDL_OpenMinizipStorage_IO that
- * automatically opens an SDL_IOStream for the given file path.
+ * automatically opens an SDL_IOStream for the given file path. The returned
+ * storage is read-only.
  *
  * \param file_path The path to the zip archive file.
  * \return A new SDL_Storage instance on success, or NULL on failure. Use SDL_GetError() for more information.
@@ -36,10 +38,11 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, b
 SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage(const char *file_path);
 
 /**
- * \brief Opens a zip archive as an SDL_Storage instance from a block of memory.
+ * \brief Opens a zip archive as a read-only SDL_Storage instance from a block of memory.
  *
  * This is a convenience wrapper around SDL_OpenMinizipStorage_IO that
- * automatically opens an SDL_IOStream for the given memory block.
+ * automatically opens an SDL_IOStream for the given memory block. The returned
+ * storage is read-only.
  *
  * \param mem A pointer to a read-only buffer containing the zip archive.
  * \param size The size of the memory buffer in bytes.
