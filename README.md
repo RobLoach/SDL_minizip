@@ -9,8 +9,6 @@ A single-header C library for reading ZIP archives using [minizip-ng](https://gi
 - Single-header `stb`-style library
 - Thread-safe
 
-> **Note:** SDL_minizip provides read-only access to ZIP archives. Write operations (`SDL_WriteStorageFile`, `SDL_RemoveStoragePath`, etc.) are not supported and will return false.
-
 ## Dependencies
 - [SDL3](https://github.com/libsdl-org/SDL)
 - [minizip-ng](https://github.com/zlib-ng/minizip-ng)
