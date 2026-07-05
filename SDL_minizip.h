@@ -283,7 +283,7 @@ static bool SDLCALL SDL_Minizip__info(void *userdata, const char *path, SDL_Path
     }
     SDL_free(dir_path);
 
-    // Fallback: detect implicit directories by scanning for entries with this prefix.
+    // Detect if it's a directory by scanning for entries with the prefix.
     char *prefix = (char *)SDL_malloc(path_len + 2);
     if (prefix) {
         SDL_snprintf(prefix, path_len + 2, "%s/", path);
