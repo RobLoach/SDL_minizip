@@ -102,11 +102,8 @@ static int32_t SDL_Minizip__open(void *stream, const char *path, int32_t mode) {
 }
 
 static int32_t SDL_Minizip__is_open(void *stream) {
-    if (!stream) return MZ_EXIST_ERROR;
+    if (!stream) return MZ_PARAM_ERROR;
     SDL_Minizip *sdl_stream = (SDL_Minizip *)stream;
-    if (!stream) {
-        return MZ_PARAM_ERROR;
-    }
     return (sdl_stream->src != NULL) ? MZ_OK : MZ_EXIST_ERROR;
 }
 
