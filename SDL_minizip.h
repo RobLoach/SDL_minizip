@@ -11,6 +11,17 @@ extern "C" {
 #define SDL_MINIZIP_DECLSPEC
 #endif
 
+#define SDL_MINIZIP_MAJOR_VERSION 1
+#define SDL_MINIZIP_MINOR_VERSION 0
+#define SDL_MINIZIP_MICRO_VERSION 0
+#define SDL_MINIZIP_VERSION SDL_VERSIONNUM(SDL_MINIZIP_MAJOR_VERSION, SDL_MINIZIP_MINOR_VERSION, SDL_MINIZIP_MICRO_VERSION)
+#define SDL_MINIZIP_VERSION_ATLEAST(X, Y, Z) (SDL_MINIZIP_VERSION >= SDL_VERSIONNUM(X, Y, Z))
+
+/**
+ * \brief Returns the linked version of SDL_minizip.
+ */
+SDL_MINIZIP_DECLSPEC int SDL_MinizipVersion(void);
+
 /**
  * \brief Opens a zip archive as a read-only SDL_Storage instance using an SDL_IOStream.
  *
@@ -63,6 +74,10 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+int SDL_MinizipVersion(void) {
+    return SDL_MINIZIP_VERSION;
+}
 
 #include <mz.h>
 #include <mz_strm.h>

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(SDL_minizip C)
+project(SDL_minizip VERSION 1.0.0 LANGUAGES C)
 
 # Try to find SDL3 locally, if not, fetch it
 find_package(SDL3 QUIET)
