@@ -282,6 +282,33 @@ static bool SDLCALL SDL_Minizip__info(void *userdata, const char *path, SDL_Path
         }
     }
     SDL_free(dir_path);
+
+    // Fallback: detect implicit directories by scanning for entries with this prefix.
+    char *prefix = (char *)SDL_malloc(path_len + 2);
+    if (prefix) {
+        SDL_snprintf(prefix, path_len + 2, "%s/", path);
+        int32_t scan_err = mz_zip_reader_goto_first_entry(ctx->reader);
+        bool found = false;
+        while (scan_err == MZ_OK) {
+            mz_zip_file *fi = NULL;
+            if (mz_zip_reader_entry_get_info(ctx->reader, &fi) == MZ_OK && fi->filename) {
+                if (SDL_strncmp(fi->filename, prefix, path_len + 1) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            scan_err = mz_zip_reader_goto_next_entry(ctx->reader);
+        }
+        SDL_free(prefix);
+        if (found) {
+            info->size = 0;
+            info->type = SDL_PATHTYPE_DIRECTORY;
+            info->create_time = info->modify_time = info->access_time = 0;
+            SDL_UnlockMutex(ctx->lock);
+            return true;
+        }
+    }
+
     SDL_SetError("File not found in zip");
     SDL_UnlockMutex(ctx->lock);
     return false;
