@@ -420,7 +420,7 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage(const char *file_path) 
         SDL_SetError("Invalid file path");
         return NULL;
     }
-    SDL_IOStream *src = SDL_IOFromFile(file_path, "r");
+    SDL_IOStream *src = SDL_IOFromFile(file_path, "rb");
     if (!src) {
         return NULL;
     }
