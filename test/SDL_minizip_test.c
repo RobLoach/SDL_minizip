@@ -103,6 +103,55 @@ int main(int argc, char *argv[]) {
     
     SDL_Log("Successfully enumerated directory and found hello.txt!");
 
+    // Test SDL_OpenMinizipStorageFile_IO
+    SDL_IOStream *entry_io = SDL_OpenMinizipStorageFile_IO(storage, "hello.txt");
+    if (!entry_io) {
+        SDL_Log("SDL_OpenMinizipStorageFile_IO failed: %s", SDL_GetError());
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+
+    Sint64 io_size = SDL_GetIOSize(entry_io);
+    if (io_size <= 0) {
+        SDL_Log("Expected positive IOStream size, got %" SDL_PRIs64, io_size);
+        SDL_CloseIO(entry_io);
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+
+    char *io_content = (char *)SDL_malloc((size_t)io_size + 1);
+    if (!io_content) {
+        SDL_CloseIO(entry_io);
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    if ((Sint64)SDL_ReadIO(entry_io, io_content, (size_t)io_size) != io_size) {
+        SDL_Log("Failed to read from IOStream: %s", SDL_GetError());
+        SDL_free(io_content);
+        SDL_CloseIO(entry_io);
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    io_content[io_size] = '\0';
+
+    // Seek back to start and read again to test seekability
+    if (SDL_SeekIO(entry_io, 0, SDL_IO_SEEK_SET) != 0) {
+        SDL_Log("Seek failed: %s", SDL_GetError());
+        SDL_free(io_content);
+        SDL_CloseIO(entry_io);
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_Log("SDL_OpenMinizipStorageFile_IO: size=%" SDL_PRIs64 ", seekable, content starts with: %.12s", io_size, io_content);
+    SDL_free(io_content);
+    SDL_CloseIO(entry_io);
+
     SDL_CloseStorage(storage);
 
     SDL_Quit();
