@@ -61,6 +61,26 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage(const char *file_path);
  */
 SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, size_t size);
 
+/**
+ * \brief Returns the number of files in a minizip storage (directories excluded).
+ *
+ * \param storage A storage returned by SDL_OpenMinizipStorage or SDL_OpenMinizipStorage_IO.
+ * \return The number of file entries, or -1 on error.
+ */
+SDL_MINIZIP_DECLSPEC int SDL_GetMinizipStorageFileCount(SDL_Storage *storage);
+
+/**
+ * \brief Returns the archive-relative path of the index-th file entry.
+ *
+ * The returned pointer remains valid until the storage is closed.
+ * Directory entries are not included.
+ *
+ * \param storage A storage returned by SDL_OpenMinizipStorage or SDL_OpenMinizipStorage_IO.
+ * \param index Zero-based index into the flat file list.
+ * \return The file path string, or NULL if out of range or on error.
+ */
+SDL_MINIZIP_DECLSPEC const char *SDL_GetMinizipStorageFilePath(SDL_Storage *storage, int index);
+
 #ifdef __cplusplus
 }
 #endif
@@ -95,7 +115,72 @@ typedef struct {
     SDL_IOStream *src; /** The IOStream for the .zip file we are reading. */
     SDL_Mutex *lock; /** Thread-safety. */
     bool closeio; /** Whether or not we are owning closing the IOStream when complete. */
+    char **file_paths; /** Flat list of file paths (directories excluded). */
+    int file_count;    /** Number of entries in file_paths. */
 } SDL_Minizip;
+
+typedef struct SDL_Minizip__RegEntry {
+    SDL_Storage *storage;
+    SDL_Minizip *ctx;
+    struct SDL_Minizip__RegEntry *next;
+} SDL_Minizip__RegEntry;
+
+static SDL_InitState SDL_Minizip__reg_state = {0};
+static SDL_Mutex *SDL_Minizip__reg_mutex = NULL;
+static SDL_Minizip__RegEntry *SDL_Minizip__reg_head = NULL;
+
+static void SDL_Minizip__reg_ensure(void) {
+    if (SDL_ShouldInit(&SDL_Minizip__reg_state)) {
+        SDL_Minizip__reg_mutex = SDL_CreateMutex();
+        SDL_SetInitialized(&SDL_Minizip__reg_state, SDL_Minizip__reg_mutex != NULL);
+    }
+}
+
+static void SDL_Minizip__reg_add(SDL_Storage *storage, SDL_Minizip *ctx) {
+    SDL_Minizip__reg_ensure();
+    if (!SDL_Minizip__reg_mutex) return;
+    SDL_Minizip__RegEntry *entry = (SDL_Minizip__RegEntry *)SDL_malloc(sizeof(SDL_Minizip__RegEntry));
+    if (!entry) return;
+    entry->storage = storage;
+    entry->ctx = ctx;
+    SDL_LockMutex(SDL_Minizip__reg_mutex);
+    entry->next = SDL_Minizip__reg_head;
+    SDL_Minizip__reg_head = entry;
+    SDL_UnlockMutex(SDL_Minizip__reg_mutex);
+}
+
+static void SDL_Minizip__reg_remove(SDL_Minizip *ctx) {
+    if (!SDL_Minizip__reg_mutex) return;
+    SDL_LockMutex(SDL_Minizip__reg_mutex);
+    SDL_Minizip__RegEntry **prev = &SDL_Minizip__reg_head;
+    while (*prev) {
+        if ((*prev)->ctx == ctx) {
+            SDL_Minizip__RegEntry *entry = *prev;
+            *prev = entry->next;
+            SDL_free(entry);
+            break;
+        }
+        prev = &(*prev)->next;
+    }
+    SDL_UnlockMutex(SDL_Minizip__reg_mutex);
+}
+
+static SDL_Minizip *SDL_Minizip__reg_get(SDL_Storage *storage) {
+    SDL_Minizip__reg_ensure();
+    if (!SDL_Minizip__reg_mutex) return NULL;
+    SDL_LockMutex(SDL_Minizip__reg_mutex);
+    SDL_Minizip__RegEntry *entry = SDL_Minizip__reg_head;
+    SDL_Minizip *ctx = NULL;
+    while (entry) {
+        if (entry->storage == storage) {
+            ctx = entry->ctx;
+            break;
+        }
+        entry = entry->next;
+    }
+    SDL_UnlockMutex(SDL_Minizip__reg_mutex);
+    return ctx;
+}
 
 static void SDL_Minizip__SetError(int32_t err, const char *msg) {
     if (err == MZ_OK) return;
@@ -190,6 +275,13 @@ static mz_stream_vtbl SDL_Minizip__vtbl = {
 static bool SDLCALL SDL_Minizip__close(void *userdata) {
     SDL_Minizip *ctx = (SDL_Minizip *)userdata;
     if (ctx) {
+        SDL_Minizip__reg_remove(ctx);
+        if (ctx->file_paths) {
+            for (int i = 0; i < ctx->file_count; i++) {
+                SDL_free(ctx->file_paths[i]);
+            }
+            SDL_free(ctx->file_paths);
+        }
         if (ctx->reader) {
             mz_zip_reader_close(ctx->reader);
             mz_zip_reader_delete(&(ctx->reader));
@@ -397,6 +489,38 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, b
         return NULL;
     }
 
+    // Build flat file list (files only, directories excluded)
+    {
+        int count = 0;
+        int32_t scan_err = mz_zip_reader_goto_first_entry(ctx->reader);
+        while (scan_err == MZ_OK) {
+            mz_zip_file *fi = NULL;
+            if (mz_zip_reader_entry_get_info(ctx->reader, &fi) == MZ_OK && fi && fi->filename) {
+                if (mz_zip_attrib_is_dir(fi->external_fa, fi->version_madeby) != MZ_OK) {
+                    count++;
+                }
+            }
+            scan_err = mz_zip_reader_goto_next_entry(ctx->reader);
+        }
+        ctx->file_paths = (char **)SDL_malloc((count > 0 ? count : 1) * sizeof(char *));
+        ctx->file_count = 0;
+        if (ctx->file_paths) {
+            scan_err = mz_zip_reader_goto_first_entry(ctx->reader);
+            while (scan_err == MZ_OK) {
+                mz_zip_file *fi = NULL;
+                if (mz_zip_reader_entry_get_info(ctx->reader, &fi) == MZ_OK && fi && fi->filename) {
+                    if (mz_zip_attrib_is_dir(fi->external_fa, fi->version_madeby) != MZ_OK) {
+                        char *path = SDL_strdup(fi->filename);
+                        if (path) {
+                            ctx->file_paths[ctx->file_count++] = path;
+                        }
+                    }
+                }
+                scan_err = mz_zip_reader_goto_next_entry(ctx->reader);
+            }
+        }
+    }
+
     SDL_StorageInterface iface;
     SDL_zero(iface);
     iface.version = sizeof(iface);
@@ -412,6 +536,7 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, b
         return NULL;
     }
 
+    SDL_Minizip__reg_add(storage, ctx);
     return storage;
 }
 
@@ -437,6 +562,36 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
         return NULL;
     }
     return SDL_OpenMinizipStorage_IO(src, true);
+}
+
+SDL_MINIZIP_DECLSPEC int SDL_GetMinizipStorageFileCount(SDL_Storage *storage) {
+    if (!storage) {
+        SDL_SetError("Invalid storage");
+        return -1;
+    }
+    SDL_Minizip *ctx = SDL_Minizip__reg_get(storage);
+    if (!ctx) {
+        SDL_SetError("Not a minizip storage");
+        return -1;
+    }
+    return ctx->file_count;
+}
+
+SDL_MINIZIP_DECLSPEC const char *SDL_GetMinizipStorageFilePath(SDL_Storage *storage, int index) {
+    if (!storage) {
+        SDL_SetError("Invalid storage");
+        return NULL;
+    }
+    SDL_Minizip *ctx = SDL_Minizip__reg_get(storage);
+    if (!ctx) {
+        SDL_SetError("Not a minizip storage");
+        return NULL;
+    }
+    if (index < 0 || index >= ctx->file_count) {
+        SDL_SetError("Index out of range");
+        return NULL;
+    }
+    return ctx->file_paths[index];
 }
 
 #ifdef __cplusplus

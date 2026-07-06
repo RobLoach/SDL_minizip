@@ -103,6 +103,35 @@ int main(int argc, char *argv[]) {
     
     SDL_Log("Successfully enumerated directory and found hello.txt!");
 
+    // Test flat file count
+    int count = SDL_GetMinizipStorageFileCount(storage);
+    if (count < 1) {
+        SDL_Log("Expected at least 1 file, got %d: %s", count, SDL_GetError());
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_Log("SDL_GetMinizipStorageFileCount: %d", count);
+
+    // Test flat file path retrieval
+    const char *path = SDL_GetMinizipStorageFilePath(storage, 0);
+    if (!path) {
+        SDL_Log("SDL_GetMinizipStorageFilePath(0) returned NULL: %s", SDL_GetError());
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_Log("SDL_GetMinizipStorageFilePath(0): %s", path);
+
+    // Out-of-range should return NULL
+    if (SDL_GetMinizipStorageFilePath(storage, count) != NULL) {
+        SDL_Log("Expected NULL for out-of-range index");
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_Log("Out-of-range index correctly returned NULL");
+
     SDL_CloseStorage(storage);
 
     SDL_Quit();
