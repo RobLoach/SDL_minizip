@@ -54,7 +54,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     add_executable(SDL_minizip_test test/SDL_minizip_test.c)
     target_compile_options(SDL_minizip_test PRIVATE -fsanitize=address -g)
     target_link_options(SDL_minizip_test PRIVATE -fsanitize=address)
-    target_link_libraries(SDL_minizip_test PRIVATE MINIZIP::minizip SDL3::SDL3)
+    target_link_libraries(SDL_minizip_test PRIVATE MINIZIP::minizip SDL3::SDL3 SDL3::SDL3_test)
     target_include_directories(SDL_minizip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${minizip_ng_SOURCE_DIR} ${minizip_ng_BINARY_DIR})
     add_test(NAME MinizipIOTest COMMAND SDL_minizip_test)
 
