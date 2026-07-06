@@ -17,9 +17,9 @@ int main(int argc, char *argv[]) {
     SDL_Init(0);
 
     // Load test.zip
-    SDL_IOStream *io = SDL_IOFromFile("test/resources/test.zip", "r");
+    SDL_IOStream *io = SDL_IOFromFile("test/resources/test.zip", "rb");
     if (!io) {
-        io = SDL_IOFromFile("resources/test.zip", "r");
+        io = SDL_IOFromFile("resources/test.zip", "rb");
         if (!io) {
             SDL_Log("Could not find test.zip: %s", SDL_GetError());
             SDL_Quit();
