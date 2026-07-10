@@ -114,7 +114,7 @@ int main(int argc, char *argv[]) {
     SDL_Log("SDL_GetMinizipStorageFileCount: %d", count);
 
     // Test flat file path retrieval
-    const char *path = SDL_GetMinizipStorageFilePath(storage, 0);
+    char *path = SDL_GetMinizipStorageFilePath(storage, 0);
     if (!path) {
         SDL_Log("SDL_GetMinizipStorageFilePath(0) returned NULL: %s", SDL_GetError());
         SDL_CloseStorage(storage);
@@ -122,6 +122,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     SDL_Log("SDL_GetMinizipStorageFilePath(0): %s", path);
+    SDL_free(path);
 
     // Out-of-range should return NULL
     if (SDL_GetMinizipStorageFilePath(storage, count) != NULL) {

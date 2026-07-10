@@ -64,6 +64,9 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
 /**
  * \brief Returns the number of files in a minizip storage (directories excluded).
  *
+ * The archive is walked recursively on each call, so cache the result rather
+ * than calling this in a loop.
+ *
  * \param storage A storage returned by SDL_OpenMinizipStorage or SDL_OpenMinizipStorage_IO.
  * \return The number of file entries, or -1 on error.
  */
@@ -72,14 +75,14 @@ SDL_MINIZIP_DECLSPEC int SDL_GetMinizipStorageFileCount(SDL_Storage *storage);
 /**
  * \brief Returns the archive-relative path of the index-th file entry.
  *
- * The returned pointer remains valid until the storage is closed.
- * Directory entries are not included.
+ * Directory entries are not included. Entry order is stable for a given
+ * archive and matches SDL_GetMinizipStorageFileCount().
  *
  * \param storage A storage returned by SDL_OpenMinizipStorage or SDL_OpenMinizipStorage_IO.
  * \param index Zero-based index into the flat file list.
- * \return The file path string, or NULL if out of range or on error.
+ * \return The file path string, or NULL if out of range or on error. Caller must free it with SDL_free().
  */
-SDL_MINIZIP_DECLSPEC const char *SDL_GetMinizipStorageFilePath(SDL_Storage *storage, int index);
+SDL_MINIZIP_DECLSPEC char *SDL_GetMinizipStorageFilePath(SDL_Storage *storage, int index);
 
 #ifdef __cplusplus
 }
@@ -115,72 +118,7 @@ typedef struct {
     SDL_IOStream *src; /** The IOStream for the .zip file we are reading. */
     SDL_Mutex *lock; /** Thread-safety. */
     bool closeio; /** Whether or not we are owning closing the IOStream when complete. */
-    char **file_paths; /** Flat list of file paths (directories excluded). */
-    int file_count;    /** Number of entries in file_paths. */
 } SDL_Minizip;
-
-typedef struct SDL_Minizip__RegEntry {
-    SDL_Storage *storage;
-    SDL_Minizip *ctx;
-    struct SDL_Minizip__RegEntry *next;
-} SDL_Minizip__RegEntry;
-
-static SDL_InitState SDL_Minizip__reg_state = {0};
-static SDL_Mutex *SDL_Minizip__reg_mutex = NULL;
-static SDL_Minizip__RegEntry *SDL_Minizip__reg_head = NULL;
-
-static void SDL_Minizip__reg_ensure(void) {
-    if (SDL_ShouldInit(&SDL_Minizip__reg_state)) {
-        SDL_Minizip__reg_mutex = SDL_CreateMutex();
-        SDL_SetInitialized(&SDL_Minizip__reg_state, SDL_Minizip__reg_mutex != NULL);
-    }
-}
-
-static void SDL_Minizip__reg_add(SDL_Storage *storage, SDL_Minizip *ctx) {
-    SDL_Minizip__reg_ensure();
-    if (!SDL_Minizip__reg_mutex) return;
-    SDL_Minizip__RegEntry *entry = (SDL_Minizip__RegEntry *)SDL_malloc(sizeof(SDL_Minizip__RegEntry));
-    if (!entry) return;
-    entry->storage = storage;
-    entry->ctx = ctx;
-    SDL_LockMutex(SDL_Minizip__reg_mutex);
-    entry->next = SDL_Minizip__reg_head;
-    SDL_Minizip__reg_head = entry;
-    SDL_UnlockMutex(SDL_Minizip__reg_mutex);
-}
-
-static void SDL_Minizip__reg_remove(SDL_Minizip *ctx) {
-    if (!SDL_Minizip__reg_mutex) return;
-    SDL_LockMutex(SDL_Minizip__reg_mutex);
-    SDL_Minizip__RegEntry **prev = &SDL_Minizip__reg_head;
-    while (*prev) {
-        if ((*prev)->ctx == ctx) {
-            SDL_Minizip__RegEntry *entry = *prev;
-            *prev = entry->next;
-            SDL_free(entry);
-            break;
-        }
-        prev = &(*prev)->next;
-    }
-    SDL_UnlockMutex(SDL_Minizip__reg_mutex);
-}
-
-static SDL_Minizip *SDL_Minizip__reg_get(SDL_Storage *storage) {
-    SDL_Minizip__reg_ensure();
-    if (!SDL_Minizip__reg_mutex) return NULL;
-    SDL_LockMutex(SDL_Minizip__reg_mutex);
-    SDL_Minizip__RegEntry *entry = SDL_Minizip__reg_head;
-    SDL_Minizip *ctx = NULL;
-    while (entry) {
-        if (entry->storage == storage) {
-            ctx = entry->ctx;
-            break;
-        }
-        entry = entry->next;
-    }
-    SDL_UnlockMutex(SDL_Minizip__reg_mutex);
-    return ctx;
-}
 
 static void SDL_Minizip__SetError(int32_t err, const char *msg) {
     if (err == MZ_OK) return;
@@ -275,13 +213,6 @@ static mz_stream_vtbl SDL_Minizip__vtbl = {
 static bool SDLCALL SDL_Minizip__close(void *userdata) {
     SDL_Minizip *ctx = (SDL_Minizip *)userdata;
     if (ctx) {
-        SDL_Minizip__reg_remove(ctx);
-        if (ctx->file_paths) {
-            for (int i = 0; i < ctx->file_count; i++) {
-                SDL_free(ctx->file_paths[i]);
-            }
-            SDL_free(ctx->file_paths);
-        }
         if (ctx->reader) {
             mz_zip_reader_close(ctx->reader);
             mz_zip_reader_delete(&(ctx->reader));
@@ -489,38 +420,6 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, b
         return NULL;
     }
 
-    // Build flat file list (files only, directories excluded)
-    {
-        int count = 0;
-        int32_t scan_err = mz_zip_reader_goto_first_entry(ctx->reader);
-        while (scan_err == MZ_OK) {
-            mz_zip_file *fi = NULL;
-            if (mz_zip_reader_entry_get_info(ctx->reader, &fi) == MZ_OK && fi && fi->filename) {
-                if (mz_zip_attrib_is_dir(fi->external_fa, fi->version_madeby) != MZ_OK) {
-                    count++;
-                }
-            }
-            scan_err = mz_zip_reader_goto_next_entry(ctx->reader);
-        }
-        ctx->file_paths = (char **)SDL_malloc((count > 0 ? count : 1) * sizeof(char *));
-        ctx->file_count = 0;
-        if (ctx->file_paths) {
-            scan_err = mz_zip_reader_goto_first_entry(ctx->reader);
-            while (scan_err == MZ_OK) {
-                mz_zip_file *fi = NULL;
-                if (mz_zip_reader_entry_get_info(ctx->reader, &fi) == MZ_OK && fi && fi->filename) {
-                    if (mz_zip_attrib_is_dir(fi->external_fa, fi->version_madeby) != MZ_OK) {
-                        char *path = SDL_strdup(fi->filename);
-                        if (path) {
-                            ctx->file_paths[ctx->file_count++] = path;
-                        }
-                    }
-                }
-                scan_err = mz_zip_reader_goto_next_entry(ctx->reader);
-            }
-        }
-    }
-
     SDL_StorageInterface iface;
     SDL_zero(iface);
     iface.version = sizeof(iface);
@@ -536,7 +435,6 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, b
         return NULL;
     }
 
-    SDL_Minizip__reg_add(storage, ctx);
     return storage;
 }
 
@@ -564,34 +462,128 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
     return SDL_OpenMinizipStorage_IO(src, true);
 }
 
+typedef struct {
+    char **items;
+    int count;
+    int capacity;
+} SDL_Minizip__PathList;
+
+static bool SDL_Minizip__pathlist_add(SDL_Minizip__PathList *list, char *path) {
+    if (list->count == list->capacity) {
+        int capacity = (list->capacity > 0) ? list->capacity * 2 : 16;
+        char **items = (char **)SDL_realloc(list->items, (size_t)capacity * sizeof(char *));
+        if (!items) {
+            SDL_OutOfMemory();
+            return false;
+        }
+        list->items = items;
+        list->capacity = capacity;
+    }
+    list->items[list->count++] = path;
+    return true;
+}
+
+static void SDL_Minizip__pathlist_free(SDL_Minizip__PathList *list) {
+    for (int i = 0; i < list->count; i++) {
+        SDL_free(list->items[i]);
+    }
+    SDL_free(list->items);
+    list->items = NULL;
+    list->count = 0;
+    list->capacity = 0;
+}
+
+static SDL_EnumerationResult SDLCALL SDL_Minizip__collect_children(void *userdata, const char *dirname, const char *fname) {
+    SDL_Minizip__PathList *children = (SDL_Minizip__PathList *)userdata;
+    size_t len = SDL_strlen(dirname) + SDL_strlen(fname) + 1;
+    char *path = (char *)SDL_malloc(len);
+    if (!path) {
+        SDL_OutOfMemory();
+        return SDL_ENUM_FAILURE;
+    }
+    SDL_snprintf(path, len, "%s%s", dirname, fname);
+    if (!SDL_Minizip__pathlist_add(children, path)) {
+        SDL_free(path);
+        return SDL_ENUM_FAILURE;
+    }
+    return SDL_ENUM_CONTINUE;
+}
+
+/* Recursively collects the full paths of all files under `path`, depth-first.
+ * The zip reader has a single entry cursor, so storage calls can't be made
+ * from inside an enumeration callback; each directory's children are gathered
+ * first and only visited after the enumeration completes. */
+static bool SDL_Minizip__collect_files(SDL_Storage *storage, const char *path, SDL_Minizip__PathList *files) {
+    SDL_Minizip__PathList children;
+    SDL_zero(children);
+    if (!SDL_EnumerateStorageDirectory(storage, path, SDL_Minizip__collect_children, &children)) {
+        SDL_Minizip__pathlist_free(&children);
+        return false;
+    }
+    for (int i = 0; i < children.count; i++) {
+        SDL_PathInfo info;
+        SDL_zero(info);
+        if (!SDL_GetStoragePathInfo(storage, children.items[i], &info)) {
+            SDL_Minizip__pathlist_free(&children);
+            return false;
+        }
+        if (info.type == SDL_PATHTYPE_DIRECTORY) {
+            if (!SDL_Minizip__collect_files(storage, children.items[i], files)) {
+                SDL_Minizip__pathlist_free(&children);
+                return false;
+            }
+        } else {
+            if (!SDL_Minizip__pathlist_add(files, children.items[i])) {
+                SDL_Minizip__pathlist_free(&children);
+                return false;
+            }
+            children.items[i] = NULL; /* ownership moved to files */
+        }
+    }
+    SDL_Minizip__pathlist_free(&children);
+    return true;
+}
+
 SDL_MINIZIP_DECLSPEC int SDL_GetMinizipStorageFileCount(SDL_Storage *storage) {
     if (!storage) {
         SDL_SetError("Invalid storage");
         return -1;
     }
-    SDL_Minizip *ctx = SDL_Minizip__reg_get(storage);
-    if (!ctx) {
-        SDL_SetError("Not a minizip storage");
+    SDL_Minizip__PathList files;
+    SDL_zero(files);
+    if (!SDL_Minizip__collect_files(storage, "", &files)) {
+        SDL_Minizip__pathlist_free(&files);
         return -1;
     }
-    return ctx->file_count;
+    int count = files.count;
+    SDL_Minizip__pathlist_free(&files);
+    return count;
 }
 
-SDL_MINIZIP_DECLSPEC const char *SDL_GetMinizipStorageFilePath(SDL_Storage *storage, int index) {
+SDL_MINIZIP_DECLSPEC char *SDL_GetMinizipStorageFilePath(SDL_Storage *storage, int index) {
     if (!storage) {
         SDL_SetError("Invalid storage");
         return NULL;
     }
-    SDL_Minizip *ctx = SDL_Minizip__reg_get(storage);
-    if (!ctx) {
-        SDL_SetError("Not a minizip storage");
-        return NULL;
-    }
-    if (index < 0 || index >= ctx->file_count) {
+    if (index < 0) {
         SDL_SetError("Index out of range");
         return NULL;
     }
-    return ctx->file_paths[index];
+    SDL_Minizip__PathList files;
+    SDL_zero(files);
+    if (!SDL_Minizip__collect_files(storage, "", &files)) {
+        SDL_Minizip__pathlist_free(&files);
+        return NULL;
+    }
+    char *path = NULL;
+    if (index < files.count) {
+        path = files.items[index];
+        files.items[index] = NULL; /* ownership moved to caller */
+    } else {
+        SDL_SetError("Index out of range");
+    }
+    SDL_Minizip__pathlist_free(&files);
+    return path;
 }
 
 #ifdef __cplusplus
