@@ -62,6 +62,20 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage(const char *file_path);
 SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, size_t size);
 
 /**
+ * \brief Allocates and reads a whole entry from a minizip storage.
+ *
+ * Equivalent to SDL_LoadFile but for a zip archive entry. The returned buffer
+ * is null-terminated so text entries can be used as C strings directly.
+ * Caller must free the returned pointer with SDL_free().
+ *
+ * \param storage A storage returned by SDL_OpenMinizipStorage or SDL_OpenMinizipStorage_IO.
+ * \param path The archive-relative path of the entry to read.
+ * \param datasize Set to the entry's uncompressed byte count; may be NULL.
+ * \return A newly allocated buffer on success, or NULL on failure. Use SDL_GetError() for more information.
+ */
+SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, const char *path, size_t *datasize);
+
+/**
  * \brief Opens a single entry from a minizip storage as a read-only, seekable SDL_IOStream.
  *
  * The entry is decompressed into memory on open, so the returned stream is
@@ -433,7 +447,7 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage(const char *file_path) 
         SDL_SetError("Invalid file path");
         return NULL;
     }
-    SDL_IOStream *src = SDL_IOFromFile(file_path, "r");
+    SDL_IOStream *src = SDL_IOFromFile(file_path, "rb");
     if (!src) {
         return NULL;
     }
@@ -450,6 +464,36 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
         return NULL;
     }
     return SDL_OpenMinizipStorage_IO(src, true);
+}
+
+SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, const char *path, size_t *datasize) {
+    if (!storage || !path) {
+        SDL_SetError("Invalid arguments");
+        return NULL;
+    }
+
+    Uint64 file_size = 0;
+    if (!SDL_GetStorageFileSize(storage, path, &file_size)) {
+        return NULL;
+    }
+
+    void *buf = SDL_malloc((size_t)file_size + 1);
+    if (!buf) {
+        SDL_OutOfMemory();
+        return NULL;
+    }
+
+    if (file_size > 0 && !SDL_ReadStorageFile(storage, path, buf, file_size)) {
+        SDL_free(buf);
+        return NULL;
+    }
+
+    ((Uint8 *)buf)[file_size] = '\0';
+
+    if (datasize) {
+        *datasize = (size_t)file_size;
+    }
+    return buf;
 }
 
 typedef struct {
@@ -500,36 +544,21 @@ static bool SDLCALL SDL_Minizip__entry_close(void *userdata) {
 }
 
 SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *storage, const char *path) {
-    if (!storage || !path) {
-        SDL_SetError("Invalid arguments");
-        return NULL;
-    }
-
-    Uint64 file_size = 0;
-    if (!SDL_GetStorageFileSize(storage, path, &file_size)) {
+    size_t datasize = 0;
+    void *data = SDL_LoadMinizipStorageFile(storage, path, &datasize);
+    if (!data) {
         return NULL;
     }
 
     SDL_Minizip__EntryIO *e = (SDL_Minizip__EntryIO *)SDL_malloc(sizeof(*e));
     if (!e) {
-        return SDL_OutOfMemory() ? NULL : NULL;
+        SDL_free(data);
+        SDL_OutOfMemory();
+        return NULL;
     }
-    e->size = (Sint64)file_size;
+    e->data = (Uint8 *)data;
+    e->size = (Sint64)datasize;
     e->pos = 0;
-    e->data = NULL;
-
-    if (file_size > 0) {
-        e->data = (Uint8 *)SDL_malloc((size_t)file_size);
-        if (!e->data) {
-            SDL_free(e);
-            return SDL_OutOfMemory() ? NULL : NULL;
-        }
-        if (!SDL_ReadStorageFile(storage, path, e->data, file_size)) {
-            SDL_free(e->data);
-            SDL_free(e);
-            return NULL;
-        }
-    }
 
     SDL_IOStreamInterface iface;
     SDL_zero(iface);

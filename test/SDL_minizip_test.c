@@ -17,9 +17,9 @@ int main(int argc, char *argv[]) {
     SDL_Init(0);
 
     // Load test.zip
-    SDL_IOStream *io = SDL_IOFromFile("test/resources/test.zip", "r");
+    SDL_IOStream *io = SDL_IOFromFile("test/resources/test.zip", "rb");
     if (!io) {
-        io = SDL_IOFromFile("resources/test.zip", "r");
+        io = SDL_IOFromFile("resources/test.zip", "rb");
         if (!io) {
             SDL_Log("Could not find test.zip: %s", SDL_GetError());
             SDL_Quit();
@@ -102,6 +102,36 @@ int main(int argc, char *argv[]) {
     }
     
     SDL_Log("Successfully enumerated directory and found hello.txt!");
+
+    // Test SDL_LoadMinizipStorageFile
+    size_t loaded_size = 0;
+    void *loaded = SDL_LoadMinizipStorageFile(storage, "hello.txt", &loaded_size);
+    if (!loaded) {
+        SDL_Log("SDL_LoadMinizipStorageFile failed: %s", SDL_GetError());
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    if (loaded_size == 0) {
+        SDL_Log("Expected non-zero loaded_size");
+        SDL_free(loaded);
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_Log("SDL_LoadMinizipStorageFile: %zu bytes, starts with: %.12s", loaded_size, (char *)loaded);
+    SDL_free(loaded);
+
+    // Test without datasize output
+    void *loaded2 = SDL_LoadMinizipStorageFile(storage, "hello.txt", NULL);
+    if (!loaded2) {
+        SDL_Log("SDL_LoadMinizipStorageFile (null size) failed: %s", SDL_GetError());
+        SDL_CloseStorage(storage);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_free(loaded2);
+    SDL_Log("SDL_LoadMinizipStorageFile with NULL datasize: OK");
 
     // Test SDL_OpenMinizipStorageFile_IO
     SDL_IOStream *entry_io = SDL_OpenMinizipStorageFile_IO(storage, "hello.txt");
