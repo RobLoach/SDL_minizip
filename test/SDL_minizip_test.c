@@ -66,6 +66,30 @@ static int SDLCALL test_open_iostream(void *arg)
     return TEST_COMPLETED;
 }
 
+static int SDLCALL test_load_file(void *arg)
+{
+    (void)arg;
+    SDL_Storage *storage = SDL_OpenMinizipStorage(zip_path());
+    CHECK(storage != NULL, "open storage for load-file test");
+    if (!storage) return TEST_COMPLETED;
+
+    size_t loaded_size = 0;
+    void *loaded = SDL_LoadMinizipStorageFile(storage, "hello.txt", &loaded_size);
+    CHECK(loaded != NULL, "SDL_LoadMinizipStorageFile succeeds");
+    CHECK(loaded_size > 0, "loaded_size is non-zero");
+    if (loaded) {
+        CHECK(((char *)loaded)[loaded_size] == '\0', "buffer is null-terminated");
+        SDL_free(loaded);
+    }
+
+    void *loaded2 = SDL_LoadMinizipStorageFile(storage, "hello.txt", NULL);
+    CHECK(loaded2 != NULL, "SDL_LoadMinizipStorageFile with NULL datasize succeeds");
+    SDL_free(loaded2);
+
+    SDL_CloseStorage(storage);
+    return TEST_COMPLETED;
+}
+
 static int SDLCALL test_open_filepath(void *arg)
 {
     (void)arg;
@@ -174,6 +198,7 @@ static const SDLTest_TestCaseReference *minizipTestCases[] = {
     CASE(test_open_iostream, "Open via SDL_IOStream"),
     CASE(test_open_filepath, "Open via file path"),
     CASE(test_open_memory,   "Open via memory buffer"),
+    CASE(test_load_file,     "SDL_LoadMinizipStorageFile"),
     CASE(test_enumerate,     "Enumerate root directory"),
     CASE(test_pathinfo,      "SDL_GetStoragePathInfo"),
     CASE(test_null_safety,   "NULL argument safety"),
