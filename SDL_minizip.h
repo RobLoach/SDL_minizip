@@ -75,6 +75,19 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
  */
 SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, const char *path, size_t *datasize);
 
+/**
+ * \brief Opens a file from an SDL_minizip storage as an SDL_IOStream.
+ *
+ * The file is decompressed into memory on open, so the returned stream is
+ * seekable and reports the correct uncompressed size via SDL_GetIOSize(). The
+ * stream owns its buffer, and frees it on \c SDL_CloseIO().
+ *
+ * \param storage A storage from \c SDL_OpenMinizipStorage() or \c SDL_OpenMinizipStorage_IO().
+ * \param path The path of the file within the archive to load.
+ * \return A new \c SDL_IOStream on success, or NULL on failure. Use \c SDL_GetError() for more information.
+ */
+SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *storage, const char *path);
+
 #ifdef __cplusplus
 }
 #endif
@@ -275,7 +288,7 @@ static bool SDLCALL SDL_Minizip__info(void *userdata, const char *path, SDL_Path
     if (!userdata || !path || !info) return false;
     SDL_Minizip *ctx = (SDL_Minizip *)userdata;
     SDL_LockMutex(ctx->lock);
-    
+
     if (mz_zip_reader_locate_entry(ctx->reader, path, 0) == MZ_OK) {
         mz_zip_file *file_info = NULL;
         if (mz_zip_reader_entry_get_info(ctx->reader, &file_info) == MZ_OK) {
@@ -481,6 +494,40 @@ SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, cons
         *datasize = (size_t)file_size;
     }
     return buf;
+}
+
+static void SDLCALL SDL_Minizip__free_entry_buffer(void *userdata, void *value) {
+    (void)userdata;
+    SDL_free(value);
+}
+
+SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *storage, const char *path) {
+    size_t datasize = 0;
+    void *data = SDL_LoadMinizipStorageFile(storage, path, &datasize);
+    if (!data) {
+        return NULL;
+    }
+
+    // When the file is empty, provide an empty SDL_IOStream, instead of reporting an error.
+    if (datasize == 0) {
+        SDL_free(data);
+        return SDL_IOFromDynamicMem();
+    }
+
+    // Create the SDL_IOStream.
+    SDL_IOStream *io = SDL_IOFromMem(data, datasize);
+    if (!io) {
+        SDL_free(data);
+        return NULL;
+    }
+
+    // The stream borrows the buffer, so free it when the stream closes.
+    if (!SDL_SetPointerPropertyWithCleanup(SDL_GetIOProperties(io), "SDL_minizip.entry_buffer", data, SDL_Minizip__free_entry_buffer, NULL)) {
+        SDL_CloseIO(io);
+        SDL_free(data);
+        return NULL;
+    }
+    return io;
 }
 
 #ifdef __cplusplus
