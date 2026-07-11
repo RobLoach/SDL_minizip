@@ -76,7 +76,7 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
 SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, const char *path, size_t *datasize);
 
 /**
- * \brief Opens a single entry from a minizip storage as a read-only, seekable SDL_IOStream.
+ * \brief Opens a single entry from a minizip storage as a seekable, in-memory SDL_IOStream.
  *
  * The entry is decompressed into memory on open, so the returned stream is
  * seekable and reports the correct uncompressed size via SDL_GetIOSize(). The
@@ -496,51 +496,9 @@ SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, cons
     return buf;
 }
 
-typedef struct {
-    Uint8 *data;
-    Sint64 size;
-    Sint64 pos;
-} SDL_Minizip__EntryIO;
-
-static Sint64 SDLCALL SDL_Minizip__entry_size(void *userdata) {
-    return ((SDL_Minizip__EntryIO *)userdata)->size;
-}
-
-static Sint64 SDLCALL SDL_Minizip__entry_seek(void *userdata, Sint64 offset, SDL_IOWhence whence) {
-    SDL_Minizip__EntryIO *e = (SDL_Minizip__EntryIO *)userdata;
-    Sint64 new_pos;
-    switch (whence) {
-        case SDL_IO_SEEK_SET: new_pos = offset; break;
-        case SDL_IO_SEEK_CUR: new_pos = e->pos + offset; break;
-        case SDL_IO_SEEK_END: new_pos = e->size + offset; break;
-        default: SDL_SetError("Invalid seek whence"); return -1;
-    }
-    if (new_pos < 0 || new_pos > e->size) {
-        SDL_SetError("Seek out of range");
-        return -1;
-    }
-    e->pos = new_pos;
-    return e->pos;
-}
-
-static size_t SDLCALL SDL_Minizip__entry_read(void *userdata, void *ptr, size_t size, SDL_IOStatus *status) {
-    SDL_Minizip__EntryIO *e = (SDL_Minizip__EntryIO *)userdata;
-    Sint64 available = e->size - e->pos;
-    if (available <= 0) {
-        *status = SDL_IO_STATUS_EOF;
-        return 0;
-    }
-    size_t to_read = (size < (size_t)available) ? size : (size_t)available;
-    SDL_memcpy(ptr, e->data + e->pos, to_read);
-    e->pos += (Sint64)to_read;
-    return to_read;
-}
-
-static bool SDLCALL SDL_Minizip__entry_close(void *userdata) {
-    SDL_Minizip__EntryIO *e = (SDL_Minizip__EntryIO *)userdata;
-    SDL_free(e->data);
-    SDL_free(e);
-    return true;
+static void SDLCALL SDL_Minizip__free_entry_buffer(void *userdata, void *value) {
+    (void)userdata;
+    SDL_free(value);
 }
 
 SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *storage, const char *path) {
@@ -550,28 +508,22 @@ SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *st
         return NULL;
     }
 
-    SDL_Minizip__EntryIO *e = (SDL_Minizip__EntryIO *)SDL_malloc(sizeof(*e));
-    if (!e) {
+    if (datasize == 0) {
+        // SDL_IOFromMem rejects empty buffers; an empty dynamic stream matches.
         SDL_free(data);
-        SDL_OutOfMemory();
+        return SDL_IOFromDynamicMem();
+    }
+
+    SDL_IOStream *io = SDL_IOFromMem(data, datasize);
+    if (!io) {
+        SDL_free(data);
         return NULL;
     }
-    e->data = (Uint8 *)data;
-    e->size = (Sint64)datasize;
-    e->pos = 0;
 
-    SDL_IOStreamInterface iface;
-    SDL_zero(iface);
-    iface.version = sizeof(iface);
-    iface.size = SDL_Minizip__entry_size;
-    iface.seek = SDL_Minizip__entry_seek;
-    iface.read = SDL_Minizip__entry_read;
-    iface.close = SDL_Minizip__entry_close;
-
-    SDL_IOStream *io = SDL_OpenIO(&iface, e);
-    if (!io) {
-        SDL_free(e->data);
-        SDL_free(e);
+    // The stream borrows the buffer, so free it when the stream closes.
+    if (!SDL_SetPointerPropertyWithCleanup(SDL_GetIOProperties(io), "SDL_minizip.entry_buffer", data, SDL_Minizip__free_entry_buffer, NULL)) {
+        SDL_CloseIO(io);
+        SDL_free(data);
         return NULL;
     }
     return io;
