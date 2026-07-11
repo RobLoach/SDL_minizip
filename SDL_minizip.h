@@ -76,15 +76,15 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, si
 SDL_MINIZIP_DECLSPEC void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, const char *path, size_t *datasize);
 
 /**
- * \brief Opens a single entry from a minizip storage as a seekable, in-memory SDL_IOStream.
+ * \brief Opens a file from an SDL_minizip storage as an SDL_IOStream.
  *
- * The entry is decompressed into memory on open, so the returned stream is
+ * The file is decompressed into memory on open, so the returned stream is
  * seekable and reports the correct uncompressed size via SDL_GetIOSize(). The
- * stream owns its buffer and frees it on SDL_CloseIO().
+ * stream owns its buffer, and frees it on \c SDL_CloseIO().
  *
- * \param storage A storage returned by SDL_OpenMinizipStorage or SDL_OpenMinizipStorage_IO.
- * \param path The archive-relative path of the entry to open.
- * \return A new SDL_IOStream on success, or NULL on failure. Use SDL_GetError() for more information.
+ * \param storage A storage from \c SDL_OpenMinizipStorage() or \c SDL_OpenMinizipStorage_IO().
+ * \param path The path of the file within the archive to load.
+ * \return A new \c SDL_IOStream on success, or NULL on failure. Use \c SDL_GetError() for more information.
  */
 SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *storage, const char *path);
 
@@ -288,7 +288,7 @@ static bool SDLCALL SDL_Minizip__info(void *userdata, const char *path, SDL_Path
     if (!userdata || !path || !info) return false;
     SDL_Minizip *ctx = (SDL_Minizip *)userdata;
     SDL_LockMutex(ctx->lock);
-    
+
     if (mz_zip_reader_locate_entry(ctx->reader, path, 0) == MZ_OK) {
         mz_zip_file *file_info = NULL;
         if (mz_zip_reader_entry_get_info(ctx->reader, &file_info) == MZ_OK) {
@@ -508,12 +508,13 @@ SDL_MINIZIP_DECLSPEC SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *st
         return NULL;
     }
 
+    // When the file is empty, provide an empty SDL_IOStream, instead of reporting an error.
     if (datasize == 0) {
-        // SDL_IOFromMem rejects empty buffers; an empty dynamic stream matches.
         SDL_free(data);
         return SDL_IOFromDynamicMem();
     }
 
+    // Create the SDL_IOStream.
     SDL_IOStream *io = SDL_IOFromMem(data, datasize);
     if (!io) {
         SDL_free(data);
