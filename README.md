@@ -59,6 +59,8 @@ int main(int argc, char* argv[]) {
 SDL_Storage *SDL_OpenMinizipStorage(const char *file_path);
 SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, bool closeio);
 SDL_Storage *SDL_OpenMinizipStorage_Mem(const void *mem, size_t size);
+void *SDL_LoadMinizipStorageFile(SDL_Storage *storage, const char *path, size_t *datasize);
+SDL_IOStream *SDL_OpenMinizipStorageFile_IO(SDL_Storage *storage, const char *path);
 ```
 
 ## License
