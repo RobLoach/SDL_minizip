@@ -36,13 +36,9 @@ static const char *EXPECTED = "Hello World from minizip-ng inside SDL_Storage!";
 
 static char *read_entry(SDL_Storage *storage)
 {
-    Uint64 sz = 0;
-    if (!SDL_GetStorageFileSize(storage, "hello.txt", &sz) || sz == 0) return NULL;
-    char *buf = (char *)SDL_malloc((size_t)sz + 1);
+    size_t len = 0;
+    char *buf = (char *)SDL_LoadMinizipStorageFile(storage, "hello.txt", &len);
     if (!buf) return NULL;
-    if (!SDL_ReadStorageFile(storage, "hello.txt", buf, sz)) { SDL_free(buf); return NULL; }
-    buf[sz] = '\0';
-    size_t len = sz;
     while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) buf[--len] = '\0';
     return buf;
 }
