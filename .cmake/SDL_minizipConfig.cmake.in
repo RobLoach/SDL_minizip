@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(SDL3)
+find_dependency(minizip)
+
+if(NOT TARGET SDL_minizip::SDL_minizip)
+    add_library(SDL_minizip::SDL_minizip INTERFACE IMPORTED)
+    set_target_properties(SDL_minizip::SDL_minizip PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@"
+        INTERFACE_LINK_LIBRARIES "MINIZIP::minizip;SDL3::SDL3")
+endif()
+
+check_required_components(SDL_minizip)

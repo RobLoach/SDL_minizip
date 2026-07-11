@@ -1,61 +1,53 @@
 cmake_minimum_required(VERSION 3.14)
 project(SDL_minizip VERSION 1.0.0 LANGUAGES C)
 
-# Try to find SDL3 locally, if not, fetch it
-find_package(SDL3 QUIET)
-if (NOT SDL3_FOUND)
-    message(STATUS "SDL3 not found locally, fetching from GitHub...")
-    include(FetchContent)
-    FetchContent_Declare(
-        SDL3
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG        release-3.2.0
-    )
-    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SDL_SHARED ON CACHE BOOL "" FORCE)
-    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(SDL3)
-endif()
+# Add the cmake package list.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/.cmake")
 
-# Fetch minizip-ng
-include(FetchContent)
-FetchContent_Declare(
-    minizip_ng
-    GIT_REPOSITORY https://github.com/zlib-ng/minizip-ng.git
-    GIT_TAG        3.0.4
-)
+# SDL3
+find_package(SDL3 REQUIRED)
 
-set(MZ_COMPAT OFF CACHE BOOL "" FORCE)
-set(MZ_ZLIB ON CACHE BOOL "" FORCE)
-set(MZ_BZIP2 OFF CACHE BOOL "" FORCE)
-set(MZ_LZMA OFF CACHE BOOL "" FORCE)
-set(MZ_PPMD OFF CACHE BOOL "" FORCE)
-set(MZ_ZSTD OFF CACHE BOOL "" FORCE)
-set(MZ_PKCRYPT OFF CACHE BOOL "" FORCE)
-set(MZ_WZAES OFF CACHE BOOL "" FORCE)
-set(MZ_OPENSSL OFF CACHE BOOL "" FORCE)
-set(MZ_LIBBSD OFF CACHE BOOL "" FORCE)
-set(MZ_ICONV OFF CACHE BOOL "" FORCE)
-set(MZ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(MZ_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
-set(MZ_FETCH_LIBS OFF CACHE BOOL "" FORCE)
-
-FetchContent_MakeAvailable(minizip_ng)
+# minizip-ng
+find_package(minizipng REQUIRED)
 
 # SDL_minizip
+include(GNUInstallDirs)
 add_library(SDL_minizip INTERFACE)
-target_include_directories(SDL_minizip INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(SDL_minizip::SDL_minizip ALIAS SDL_minizip)
+target_include_directories(SDL_minizip INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(SDL_minizip INTERFACE MINIZIP::minizip SDL3::SDL3)
+
+# Install
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    include(CMakePackageConfigHelpers)
+
+    install(FILES SDL_minizip.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/.cmake/SDL_minizipConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/SDL_minizipConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SDL_minizip
+        PATH_VARS CMAKE_INSTALL_INCLUDEDIR)
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/SDL_minizipConfigVersion.cmake
+        COMPATIBILITY SameMajorVersion)
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/SDL_minizipConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/SDL_minizipConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/SDL_minizip)
+endif()
 
 # Tests
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     enable_testing()
     add_executable(SDL_minizip_test test/SDL_minizip_test.c)
-    target_compile_options(SDL_minizip_test PRIVATE -fsanitize=address -g)
-    target_link_options(SDL_minizip_test PRIVATE -fsanitize=address)
-    target_link_libraries(SDL_minizip_test PRIVATE MINIZIP::minizip SDL3::SDL3 SDL3::SDL3_test)
-    target_include_directories(SDL_minizip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${minizip_ng_SOURCE_DIR} ${minizip_ng_BINARY_DIR})
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(SDL_minizip_test PRIVATE -fsanitize=address -g)
+        target_link_options(SDL_minizip_test PRIVATE -fsanitize=address)
+    endif()
+    target_link_libraries(SDL_minizip_test PRIVATE SDL_minizip SDL3::SDL3_test)
     add_test(NAME MinizipIOTest COMMAND SDL_minizip_test)
 
     add_custom_command(TARGET SDL_minizip_test POST_BUILD

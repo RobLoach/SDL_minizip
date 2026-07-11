@@ -410,7 +410,7 @@ SDL_MINIZIP_DECLSPEC SDL_Storage *SDL_OpenMinizipStorage_IO(SDL_IOStream *src, b
 
     ctx->stream.vtbl = &SDL_Minizip__vtbl;
 
-    mz_zip_reader_create(&ctx->reader);
+    ctx->reader = mz_zip_reader_create();
     if (!ctx->reader) {
         SDL_SetError("Failed to create zip reader");
         SDL_Minizip__close(ctx);
